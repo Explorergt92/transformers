@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from packaging import version
 
+from .._typing import AqlmConfigLike
 from .base import HfQuantizer
 
 
@@ -54,6 +55,8 @@ class AqlmHfQuantizer(HfQuantizer):
         model: "PreTrainedModel",
         **kwargs,
     ):
+        quantization_config = cast(AqlmConfigLike, self.quantization_config)
+        modules_to_not_convert = quantization_config.linear_weights_not_to_quantize
         replace_with_aqlm_linear(
             model,
             modules_to_not_convert=self.quantization_config.linear_weights_not_to_quantize,

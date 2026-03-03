@@ -66,8 +66,20 @@ class TorchAoHfQuantizer(HfQuantizer):
     def __init__(self, quantization_config, **kwargs):
         super().__init__(quantization_config, **kwargs)
 
-        size_digit = _fuzzy_match_size(type(self.quantization_config.quant_type).__name__)
-        self.quantized_param_size = 0.5 if size_digit == "4" else 1
+        self.quantized_param_size = None
+        quantization_config = cast(TorchAoConfigLike, self.quantization_config)
+        quant_type = quantization_config.quant_type
+        if isinstance(quant_type, str):
+            map_to_param_size = {
+                "int4_weight_only": 0.5,
+                "int8_weight_only": 1,
+                "int8_dynamic_activation_int8_weight": 1,
+            }
+            if quant_type in map_to_param_size:
+                self.quantized_param_size = map_to_param_size[quant_type]
+        else:
+            size_digit = fuzzy_match_size(quant_type.__class__.__name__)
+            self.quantized_param_size = 0.5 if size_digit == "4" else 1
 
     def validate_environment(self, *args, **kwargs):
         if not is_torchao_available():
@@ -83,6 +95,25 @@ class TorchAoHfQuantizer(HfQuantizer):
                         "You are attempting to perform disk offload with a pre-quantized torchao model "
                         "This is not supported yet . Please remove the disk device from the device_map."
                     )
+        if self.pre_quantized:
+            weights_only = kwargs.get("weights_only")
+            if weights_only:
+                if not is_torch_greater_or_equal(MIN_TORCH_VERSION):
+                    raise RuntimeError(
+                        f"In order to use torchao pre-quantized model, you need to have torch>={MIN_TORCH_VERSION}. "
+                        f"However, the current version is {get_torch_version()}."
+                        f" You can also set with `weights_only=False` in `from_pretrained` if you don't want to update torch"
+                    )
+
+    def update_dtype(self, dtype):
+        quantization_config = cast(TorchAoConfigLike, self.quantization_config)
+        if quantization_config.quant_type == "int4_weight_only":
+            if dtype != torch.bfloat16:
+                logger.warning_once(
+                    f"Setting dtype to {dtype} for int4_weight_only quantization, but only bfloat16 is supported right now. Overwriting torch_dtype to bfloat16."
+                )
+                dtype = torch.bfloat16
+        return dtype
 
     def get_state_dict_and_metadata(self, model):
         """
@@ -103,10 +134,11 @@ class TorchAoHfQuantizer(HfQuantizer):
         return max_memory
 
     def _process_model_before_weight_loading(self, model: "PreTrainedModel", checkpoint_files=None, **kwargs):
+        quantization_config = cast(TorchAoConfigLike, self.quantization_config)
         self.modules_to_not_convert = self.get_modules_to_not_convert(
-            model, self.quantization_config.modules_to_not_convert, model._keep_in_fp32_modules
+            model, quantization_config.modules_to_not_convert, model._keep_in_fp32_modules
         )
-        if self.quantization_config.include_input_output_embeddings:
+        if quantization_config.include_input_output_embeddings:
             input_emb = model.get_input_embeddings()
             input_emb_names = [name for name, module in model.named_modules() if id(module) == id(input_emb)]
             output_emb = model.get_output_embeddings()
@@ -126,22 +158,23 @@ class TorchAoHfQuantizer(HfQuantizer):
         # we only quantize the weight of nn.Linear and nn.Embedding
         module, tensor_name = get_module_from_name(model, param_name)
         _QUANTIZABLE = [torch.nn.Linear]
-        if self.quantization_config.include_input_output_embeddings:
+        quantization_config = cast(TorchAoConfigLike, self.quantization_config)
+        if quantization_config.include_input_output_embeddings:
             _QUANTIZABLE.append(torch.nn.Embedding)
 
         from torchao.quantization import FqnToConfig, fqn_matches_fqn_config
 
-        if isinstance(self.quantization_config.quant_type, FqnToConfig):
-            module_fqn, _ = param_name.rsplit(".", 1)
-            if (
-                fqn_matches_fqn_config(module_fqn, self.quantization_config.quant_type)
-                or fqn_matches_fqn_config(param_name, self.quantization_config.quant_type)
-                or (
-                    "_default" in self.quantization_config.quant_type.fqn_to_config
-                    and isinstance(module, tuple(_QUANTIZABLE))
-                )
-            ):
-                return True
+            if isinstance(quantization_config.quant_type, FqnToConfig):
+                module_fqn, param_name_fqn = param_name.rsplit(".", 1)
+                if (
+                    fqn_matches_fqn_config(module_fqn, quantization_config.quant_type)
+                    or fqn_matches_fqn_config(param_name, quantization_config.quant_type)
+                    or (
+                        "_default" in quantization_config.quant_type.fqn_to_config
+                        and isinstance(module, tuple(_QUANTIZABLE))
+                    )
+                ):
+                    return True
 
         return isinstance(module, tuple(_QUANTIZABLE)) and tensor_name == "weight"
 
@@ -150,8 +183,12 @@ class TorchAoHfQuantizer(HfQuantizer):
 
     @property
     def is_trainable(self) -> bool:
-        # Only 8-bit quantization (e.g. Int8WeightOnly, Int8DynamicActivationInt8Weight) supports training
-        return _fuzzy_match_size(type(self.quantization_config.quant_type).__name__) == "8"
+        supported_quant_types_for_training = [
+            "int8_weight_only",
+            "int8_dynamic_activation_int8_weight",
+        ]
+        quantization_config = cast(TorchAoConfigLike, self.quantization_config)
+        return quantization_config.quant_type in supported_quant_types_for_training
 
     @property
     def is_compileable(self) -> bool:

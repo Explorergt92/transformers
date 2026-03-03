@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from packaging import version
 
+from .._typing import GPTQConfigLike
 from .base import HfQuantizer
 
 
@@ -53,7 +54,8 @@ class GptqHfQuantizer(HfQuantizer):
             raise ImportError("Loading a GPTQ quantized model requires optimum (`pip install optimum`)")
         from optimum.gptq import GPTQQuantizer
 
-        self.optimum_quantizer = GPTQQuantizer.from_dict(self.quantization_config.to_dict_optimum())
+        gptq_quantization_config = cast(GPTQConfigLike, self.quantization_config)
+        self.optimum_quantizer = GPTQQuantizer.from_dict(gptq_quantization_config.to_dict_optimum())
 
     def validate_environment(self, *args, **kwargs):
         if not is_optimum_available():
@@ -94,13 +96,14 @@ class GptqHfQuantizer(HfQuantizer):
                 model = self.optimum_quantizer.convert_model(model, **kwargs)
 
     def _process_model_after_weight_loading(self, model: "PreTrainedModel", **kwargs):
+        gptq_quantization_config = cast(GPTQConfigLike, self.quantization_config)
         if self.pre_quantized:
             model = self.optimum_quantizer.post_init_model(model)
         else:
-            if self.quantization_config.tokenizer is None:
-                self.quantization_config.tokenizer = model.name_or_path
+            if gptq_quantization_config.tokenizer is None:
+                gptq_quantization_config.tokenizer = model.name_or_path
 
-            self.optimum_quantizer.quantize_model(model, self.quantization_config.tokenizer)
+            self.optimum_quantizer.quantize_model(model, gptq_quantization_config.tokenizer)
             model.config.quantization_config = GPTQConfig.from_dict(self.optimum_quantizer.to_dict())
 
     @property

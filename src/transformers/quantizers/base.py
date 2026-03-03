@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from .._typing import QuantizedModelLike
 from ..utils import is_torch_available, logging
 from ..utils.quantization_config import QuantizationConfigMixin, QuantizationMethod
 from .quantizers_utils import get_module_from_name
@@ -203,7 +204,7 @@ class HfQuantizer(ABC):
             del model.config.quantization_config
         if hasattr(model, "quantization_method"):
             del model.quantization_method
-        model.is_quantized = False
+        cast(QuantizedModelLike, model).is_quantized = False
 
     def dequantize(self, model, dtype=None):
         """
