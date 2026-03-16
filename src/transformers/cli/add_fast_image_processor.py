@@ -42,16 +42,21 @@ def add_fast_image_processor(
     """
     model_module = TRANSFORMERS_PATH / "models" / model_name
     image_processing_module_files = list(model_module.glob("image_processing*.py"))
+    selected_file: Path | None = None
     if not image_processing_module_files:
         raise ValueError(f"No image processing module found in {model_module}")
     elif len(image_processing_module_files) > 1:
-        image_processing_module_file = ""
         for file_name in image_processing_module_files:
-            if not str(file_name).endswith("_fast.py"):
-                image_processing_module_file = str(file_name)
+            if not file_name.name.endswith("_fast.py"):
+                selected_file = file_name
                 break
     else:
-        image_processing_module_file = str(image_processing_module_files[0])
+        selected_file = image_processing_module_files[0]
+
+    if selected_file is None:
+        raise ValueError(f"No image processing module found in {model_module}")
+
+    image_processing_module_file = str(selected_file)
 
     with open(image_processing_module_file, "r", encoding="utf-8") as f:
         content_base_file = f.read()
