@@ -172,7 +172,7 @@ tags
 
 # lint caches
 utils/.check_modeling_structure_cache.json
-utils/.check_docstrings_cache.json
+utils/.checkers_cache.json
 utils/mlinter/.mlinter_cache.json
 
 # modular conversion
