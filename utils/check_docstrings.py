@@ -383,6 +383,8 @@ MATH_OPERATORS = {
     ast.BitXor: op.xor,
     ast.USub: op.neg,
 }
+
+
 def has_auto_docstring_decorator(obj) -> bool:
     try:
         # Get the source lines for the object
