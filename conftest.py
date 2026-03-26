@@ -15,8 +15,13 @@
 # tests directory-specific settings - this file is run automatically
 # by pytest before any tests are run
 
-import doctest
 import os
+
+
+# TEMP: force empty HF cache for AMD CI cold-cache timing test
+os.environ["HF_HOME"] = "/tmp/hf_empty_cache"
+
+import doctest
 import sys
 import warnings
 from os.path import abspath, dirname, join
